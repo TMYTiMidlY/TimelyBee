@@ -1,0 +1,29 @@
+[project]
+name = "pydantic-ai-multichannel-agent"
+version = "0.1.0"
+description = "Single-process multi-channel Pydantic AI agent service."
+readme = "README.md"
+authors = [
+    { name = "TMYTiMidlY", email = "93774927+TMYTiMidlY@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "aiosqlite>=0.21.0",
+    "pydantic-ai-slim[openai]>=0.3.0",
+    "pydantic-settings>=2.11.0",
+    "python-dotenv>=1.1.1",
+    "qq-botpy>=1.2.1",
+]
+
+[project.scripts]
+agent-service = "agent_service.cli.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"
