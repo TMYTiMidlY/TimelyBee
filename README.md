@@ -1,8 +1,8 @@
 # TimelyBee
 
 Pydantic AI 驱动的多消息渠道 Agent 框架，支持微信/QQ 接入、会话控制、日历长期记忆、后台任务和 Codex 子系统。
+TimelyBee 是一个单进程 Python 多渠道助理底座：通过 OpeniLink Hub Webhook 接入微信，把消息归一后交给 Pydantic AI Agent，再用 OpeniLink Bot API 异步回发。`x-cmd weixin` 与 `botpy` 也可作为适配器接入。
 
-单进程 Python 底座：通过 OpeniLink Hub Webhook 接入微信，把消息归一后交给 Pydantic AI Agent，再用 OpeniLink Bot API 异步回发。`x-cmd weixin` 与 `botpy` 仍保留为 legacy/debug 适配器。
 
 ## 当前进度（2026-04-29）
 
@@ -13,8 +13,12 @@ Pydantic AI 驱动的多消息渠道 Agent 框架，支持微信/QQ 接入、会
 - [x] MiniMax OpenAI-compatible 接入（默认 `https://api.minimaxi.com/v1`）
 - [x] MiniMax 实网烟雾测试（模型返回正常）
 - [x] OpeniLink Hub Webhook 异步通道：签名验证、URL verification、`message.text` 归一化、去重、Bot API 回发
+- [x] IntentAgent + deterministic Router：先分类控制意图，再由代码管理状态
+- [x] 三条状态线拆分：短期上下文、后台任务、会话模型选择
+- [x] 日历长期记忆骨架、Codex Python SDK backend、后台任务模型快照
+- [x] Codex Python SDK 已通过 `uv add --editable ../codex/sdk/python` 纳入依赖管理
 - [x] weixin 子进程链路本地模拟闭环（legacy debug）
-- [ ] botpy 事件处理（`on_at_message_create` 等）完整实现（当前为占位适配器）
+- [x] botpy 事件处理：频道 at、频道私信、群 at、C2C 消息归一化与对应 API 回发
 
 ## 本次联调结果
 
@@ -49,12 +53,18 @@ Webhook 行为：
 
 - `AGENT_PROVIDER` (`deepseek` / `minimax`)
 - `AGENT_MODEL`
+- `INTENT_AGENT_ENABLED`（默认 `true`；未配置 provider key 时自动降级到规则分类）
+- `INTENT_AGENT_PROVIDER`（为空时跟随 `AGENT_PROVIDER`）
+- `INTENT_AGENT_MODEL`（为空时跟随当前默认模型；建议配置轻量模型）
 - `DEEPSEEK_API_KEY`
 - `MINIMAX_API_KEY`
 - `MINIMAX_CN_API_KEY`
 - `MINIMAX_BASE_URL`（默认 `https://api.minimaxi.com/v1`）
 - `BOTPY_APPID`
 - `BOTPY_SECRET`
+- `CODEX_MODEL`（默认 `gpt-5.4`）
+- `CODEX_WORKSPACE`（默认 `.`）
+- `CODEX_BIN`（为空时使用 Codex SDK 默认 app-server 启动方式）
 - `ENABLED_CHANNELS`（默认 `openilink`，legacy 可用 `weixin` / `botpy`）
 - `SQLITE_PATH`
 - `AGENT_SERVICE_HOST`（默认 `127.0.0.1`）
@@ -97,6 +107,53 @@ Authorization: Bearer ${OPENILINK_APP_TOKEN}
 {"type":"text","content":"...","to":"wxid_...","trace_id":"tr_..."}
 ```
 
+## 控制架构
+
+当前采用“Pydantic AI 主控 + 业务服务 + Codex SDK 子系统”的融合版，不把所有流程都强行改成外部状态机。消息主链路仍然是：
+
+```text
+OpeniLink/QQ Adapter
+  -> Orchestrator queue
+  -> SQLite 去重和审计
+  -> IntentAgent 分类
+  -> deterministic Router
+  -> 普通 Agent / 日历 / 任务 / 模型管理 / Codex 模式
+  -> Channel send_reply
+```
+
+核心边界：
+
+- Pydantic AI 负责两件事：轻量意图判断，以及普通聊天 Agent 的自然语言和工具调用。
+- Router 负责系统状态变更：清上下文、停止任务、切模型、进入/退出 Codex、日历读写。
+- 模型不能直接决定系统状态怎么改，只能输出意图和少量结构化字段。
+
+支持的控制意图：
+
+| intent | 行为 |
+| --- | --- |
+| `new_clear` | 清空当前会话短期上下文，开启新话题 |
+| `resume` | 继续当前上下文或 Codex 前台会话 |
+| `cancel_stop_kill` | 停止后台任务，不清上下文 |
+| `switch_model` | 当前会话级切换模型 |
+| `show_model` | 显示当前会话模型 |
+| `reset_model` | 当前会话恢复默认模型 |
+| `calendar` | 日程、提醒、安排查询和写入 |
+| `command` | 简单执行任务入口，优先 Pythonic 命令 |
+| `codex` | Codex 前台/后台任务入口 |
+| `normal_chat` | 普通对话 |
+
+三条状态线互不混淆：
+
+- 短期上下文生命周期：`new_clear` 只递增 `short_context_generation`，后续历史只加载新 generation。
+- 后台任务生命周期：`cancel_stop_kill` 只更新 `background_tasks`，不清上下文、不改模型。
+- 会话模型选择生命周期：`switch_model` 只写当前 `channel + conversation_id` 的 `session_state`，不影响其他会话。
+
+长期事实：
+
+- `calendar_events` 是长期记忆，不会因为 `new_clear` 被删除。
+- 后台任务创建时会保存当时的 `model_provider/model_name/context_generation`，之后用户切模型也不会改变已启动任务的模型快照。
+- 后台任务结果汇报时应标明“这是之前启动的后台任务结果”，避免和新话题混淆。
+
 ## 设计审阅（对照 Pydantic AI 标准示例）
 
 ### 已符合
@@ -106,6 +163,7 @@ Authorization: Bearer ${OPENILINK_APP_TOKEN}
 - 工具注册走 `@agent.tool_plain`（与官方工具调用风格一致）
 - 多渠道适配器与 Agent 解耦，便于后续扩展
 - OpeniLink 通道只处理 Hub App 协议，不承担微信连接和重连状态管理
+- IntentAgent 输出结构化 `IntentDecision`，Router 用确定性代码执行状态变更
 
 ### 已补齐
 
@@ -113,9 +171,15 @@ Authorization: Bearer ${OPENILINK_APP_TOKEN}
 - `message_history` 传入 `ModelMessage` 序列，保留 tool call/return 等结构
 - 渠道原始消息仍单独保存，用于审计、去重和排障
 - OpeniLink `trace_id`、`installation_id`、`bot.id`、`event.id`、`group.id` 保存在 `InboundMessage.raw`
+- botpy 已接 `on_at_message_create`、`on_direct_message_create`、`on_group_at_message_create`、`on_c2c_message_create`
+- botpy 回发按消息来源分别调用 `post_message`、`post_dms`、`post_group_message`、`post_c2c_message`
+- 控制类回复不再覆盖 Pydantic AI 可复用 `message_history`
 - 会话 key：
   - 私聊：`openilink:{bot_id}:{sender_id}`
   - 群聊：`openilink:{bot_id}:{group_id}:{sender_id}`
+- SQLite 增加 `session_state`、`calendar_events`、`background_tasks`
+- `BackgroundTaskManager` 负责进程内 task handle、取消、完成/失败落库和完成汇报
+- `CodexSessionManager` 使用 experimental Codex Python SDK 的 `AsyncCodex` / `thread_start()` / `thread.run()`；同一服务进程内复用前台 thread
 
 ### 待完善（下一步）
 
@@ -125,11 +189,23 @@ Authorization: Bearer ${OPENILINK_APP_TOKEN}
   - 要补什么：在真实微信群中验证 Bot API 的投递行为，必要时扩展 OpeniLink reply payload。
   - 验收标准：私聊和群聊都能稳定回到触发消息的上下文。
 
-- [ ] botpy 真实事件接入
-  - 现在是什么：`BotpyAdapter` 仍是占位实现，只会保持进程存活，不会真的连接 QQ 频道/机器人事件流。
-  - 为什么要做：启用 `ENABLED_CHANNELS=botpy` 后，服务应该能接收 QQ 机器人事件，例如 `on_at_message_create`，把用户消息归一化成 `InboundMessage`，再把 Agent 回复发回对应频道。
-  - 要补什么：初始化 botpy client、注册消息事件回调、解析 guild/channel/user/message id、实现发送文本回复、处理 bot 自己发出的消息避免自循环。
-  - 验收标准：配置 `BOTPY_APPID` / `BOTPY_SECRET` 后，真实 QQ 频道里 at 机器人，数据库能看到 inbound 消息，Agent 能回复到同一个频道。
+- [ ] Codex SDK 真实 turn 验证
+  - 现在是什么：代码已按官方 Codex Python SDK 文档接入 `codex_app_server.AsyncCodex`；本地 Codex repo 已 checkout 到 `../codex`，SDK 已用 `uv add --editable ../codex/sdk/python` 加入依赖，登录状态和 app-server 初始化已验证。
+  - 为什么要做：Python SDK 是 experimental，真实 turn 会实际调用 Codex 模型并可能触发审批、沙箱和计费。
+  - 要补什么：用一条低风险提示验证前台 enter/continue/exit 和后台 Codex 任务。
+  - 验收标准：进入 Codex 后能继续同一 thread，退出后普通聊天恢复；后台 Codex 任务完成后能按原会话汇报。
+
+- [ ] Command runner 白名单
+  - 现在是什么：`command` 意图已被识别，后台任务有进程内 task handle、状态落库和完成汇报；前台执行只允许后续注册的 Pythonic 命令。
+  - 为什么要做：不能把用户输入直接交给 shell，需要权限、审计和审批边界。
+  - 要补什么：定义 Pythonic command registry、权限策略和必要时的审批流程。
+  - 验收标准：简单安全命令可执行，高风险命令会拒绝或要求确认，所有调用写入 audit log。
+
+- [ ] botpy 实网验证
+  - 现在是什么：`BotpyAdapter` 已初始化 botpy client，注册频道/私信/群/C2C 事件并实现对应回发 API。
+  - 为什么要做：QQ 机器人不同场景的权限、被动回复窗口和消息字段可能随机器人类型变化。
+  - 要补什么：用真实 `BOTPY_APPID` / `BOTPY_SECRET` 分别验证频道 at、频道私信、群 at、C2C。
+  - 验收标准：真实 QQ 场景里消息能入库，Agent 能回复到同一上下文，并且不会回复机器人自己发出的消息。
 
 - [ ] 长回复分片
   - 现在是什么：Agent 的回复会作为一整段文本交给渠道发送。

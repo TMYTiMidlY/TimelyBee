@@ -18,7 +18,7 @@ class FakeRuntime:
     def __init__(self) -> None:
         self.calls: list[InboundMessage] = []
 
-    async def handle(self, inbound: InboundMessage, history=None) -> AgentReply:
+    async def handle(self, inbound: InboundMessage, history=None, store=None) -> AgentReply:
         self.calls.append(inbound)
         return AgentReply(text=f"reply:{inbound.text}", metadata={"fake": True}, model_messages_json="[]")
 

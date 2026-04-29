@@ -1,7 +1,7 @@
 [project]
-name = "pydantic-ai-multichannel-agent"
+name = "timelybee"
 version = "0.1.0"
-description = "Single-process multi-channel Pydantic AI agent service."
+description = "Single-process multi-channel Pydantic AI agent service for TimelyBee."
 readme = "README.md"
 authors = [
     { name = "TMYTiMidlY", email = "93774927+TMYTiMidlY@users.noreply.github.com" }
@@ -11,6 +11,7 @@ dependencies = [
     "aiosqlite>=0.21.0",
     "fastapi>=0.136.1",
     "httpx>=0.28.1",
+    "openai-codex-app-server-sdk",
     "pydantic-ai-slim[openai]>=0.3.0",
     "pydantic-settings>=2.11.0",
     "python-dotenv>=1.1.1",
@@ -30,3 +31,6 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.9.17,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+openai-codex-app-server-sdk = { path = "../codex/sdk/python", editable = true }

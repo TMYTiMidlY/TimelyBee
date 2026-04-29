@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     agent_provider: str = Field(default="deepseek", alias="AGENT_PROVIDER")
     agent_model: str = Field(default="", alias="AGENT_MODEL")
+    intent_agent_enabled: bool = Field(default=True, alias="INTENT_AGENT_ENABLED")
+    intent_agent_provider: str = Field(default="", alias="INTENT_AGENT_PROVIDER")
+    intent_agent_model: str = Field(default="", alias="INTENT_AGENT_MODEL")
     deepseek_api_key: str = Field(default="", alias="DEEPSEEK_API_KEY")
     minimax_api_key: str = Field(default="", alias="MINIMAX_API_KEY")
     minimax_cn_api_key: str = Field(default="", alias="MINIMAX_CN_API_KEY")
@@ -22,6 +25,10 @@ class Settings(BaseSettings):
 
     botpy_appid: str = Field(default="", alias="BOTPY_APPID")
     botpy_secret: str = Field(default="", alias="BOTPY_SECRET")
+
+    codex_model: str = Field(default="gpt-5.4", alias="CODEX_MODEL")
+    codex_workspace: Path = Field(default=Path("."), alias="CODEX_WORKSPACE")
+    codex_bin: str = Field(default="", alias="CODEX_BIN")
 
     enabled_channels: str = Field(default="openilink", alias="ENABLED_CHANNELS")
     sqlite_path: Path = Field(default=Path("./data/agent.db"), alias="SQLITE_PATH")
@@ -57,6 +64,16 @@ class Settings(BaseSettings):
         if self.agent_provider.lower() == "minimax":
             return "MiniMax-M2.7"
         return "deepseek-chat"
+
+    @property
+    def effective_intent_provider(self) -> str:
+        return self.intent_agent_provider or self.agent_provider
+
+    @property
+    def effective_intent_model(self) -> str:
+        if self.intent_agent_model:
+            return self.intent_agent_model
+        return self.effective_model
 
 
 @lru_cache(maxsize=1)

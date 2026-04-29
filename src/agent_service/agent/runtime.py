@@ -6,7 +6,12 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage
 
 from agent_service.agent.model_factory import build_model
+from agent_service.assistant.intent import IntentAgent
+from agent_service.assistant.router import AssistantRouter
+from agent_service.background import BackgroundTaskManager
+from agent_service.codex import CodexSessionManager
 from agent_service.config.settings import Settings
+from agent_service.storage.sqlite_store import SQLiteStore
 from agent_service.types import AgentReply, InboundMessage
 
 
@@ -20,16 +25,38 @@ SYSTEM_PROMPT = (
 class AgentRuntime:
     settings: Settings
     agent: Agent[dict, str] = field(init=False)
+    intent_agent: IntentAgent = field(init=False)
+    router: AssistantRouter = field(init=False)
 
     def __post_init__(self) -> None:
         model = build_model(self.settings)
         self.agent = Agent(model=model, system_prompt=SYSTEM_PROMPT)
+        self.intent_agent = IntentAgent(self.settings)
+        self.router = AssistantRouter(self.settings, self.agent, SYSTEM_PROMPT)
 
         @self.agent.tool_plain
         def echo_tool(text: str) -> str:
             return text
 
-    async def handle(self, inbound: InboundMessage, history: list[ModelMessage] | None = None) -> AgentReply:
+    def attach_services(
+        self,
+        *,
+        background_tasks: BackgroundTaskManager | None = None,
+        codex: CodexSessionManager | None = None,
+    ) -> None:
+        self.router.background_tasks = background_tasks
+        self.router.codex = codex
+
+    async def handle(
+        self,
+        inbound: InboundMessage,
+        history: list[ModelMessage] | None = None,
+        store: SQLiteStore | None = None,
+    ) -> AgentReply:
+        if store is not None:
+            decision = await self.intent_agent.classify(inbound)
+            return await self.router.route(inbound, decision, store)
+
         history = history or []
         prompt = (
             f"[channel={inbound.channel}] [conversation_id={inbound.conversation_id}] "
