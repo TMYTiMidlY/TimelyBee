@@ -23,8 +23,17 @@ class Settings(BaseSettings):
     botpy_appid: str = Field(default="", alias="BOTPY_APPID")
     botpy_secret: str = Field(default="", alias="BOTPY_SECRET")
 
-    enabled_channels: str = Field(default="weixin", alias="ENABLED_CHANNELS")
+    enabled_channels: str = Field(default="openilink", alias="ENABLED_CHANNELS")
     sqlite_path: Path = Field(default=Path("./data/agent.db"), alias="SQLITE_PATH")
+    agent_service_host: str = Field(default="127.0.0.1", alias="AGENT_SERVICE_HOST")
+    agent_service_port: int = Field(default=8080, alias="AGENT_SERVICE_PORT")
+
+    openilink_hub_url: str = Field(default="http://localhost:9800", alias="OPENILINK_HUB_URL")
+    openilink_app_token: str = Field(default="", alias="OPENILINK_APP_TOKEN")
+    openilink_webhook_secret: str = Field(default="", alias="OPENILINK_WEBHOOK_SECRET")
+    openilink_webhook_path: str = Field(default="/openilink/webhook", alias="OPENILINK_WEBHOOK_PATH")
+    openilink_sync_reply: bool = Field(default=False, alias="OPENILINK_SYNC_REPLY")
+
     weixin_x_bin: str = Field(default="x-cmd", alias="WEIXIN_X_BIN")
     weixin_poll_timeout_ms: int = Field(default=3000, alias="WEIXIN_POLL_TIMEOUT_MS")
     self_sender_ids: str = Field(default="", alias="SELF_SENDER_IDS")

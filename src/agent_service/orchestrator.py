@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from agent_service.adapters.openilink import OpeniLinkAdapter
 from agent_service.adapters.botpy_adapter import BotpyAdapter
 from agent_service.adapters.weixin import WeixinAdapter
 from agent_service.agent.runtime import AgentRuntime
@@ -23,6 +24,8 @@ class Orchestrator:
         self._build_adapters()
 
     def _build_adapters(self) -> None:
+        if "openilink" in self.settings.enabled_channel_list:
+            self.adapters["openilink"] = OpeniLinkAdapter(self.settings, self.enqueue_inbound)
         if "weixin" in self.settings.enabled_channel_list:
             self.adapters["weixin"] = WeixinAdapter(self.settings, self.enqueue_inbound)
         if "botpy" in self.settings.enabled_channel_list:

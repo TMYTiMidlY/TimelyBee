@@ -11,3 +11,8 @@ wheels/
 
 # Local environment
 .env
+
+# Local runtime state
+data/
+logs/
+.pytest_cache/

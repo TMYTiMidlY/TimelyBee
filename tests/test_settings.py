@@ -15,5 +15,10 @@ def test_enabled_channels_parse() -> None:
     assert settings.enabled_channel_list == ["botpy", "weixin"]
 
 
+def test_openilink_is_default_channel() -> None:
+    assert Settings(_env_file=None).enabled_channel_list == ["openilink"]
+    assert Settings.model_fields["openilink_webhook_path"].default == "/openilink/webhook"
+
+
 def test_weixin_defaults_to_x_cmd() -> None:
     assert Settings.model_fields["weixin_x_bin"].default == "x-cmd"

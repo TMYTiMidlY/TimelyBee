@@ -2,18 +2,18 @@
 
 Pydantic AI 驱动的多消息渠道 Agent 框架，支持微信/QQ 接入、会话控制、日历长期记忆、后台任务和 Codex 子系统。
 
-单进程 Python 底座：统一接入 `botpy` 与 `x-cmd weixin`，把消息归一后交给 Pydantic AI Agent，再回发到对应渠道。
+单进程 Python 底座：通过 OpeniLink Hub Webhook 接入微信，把消息归一后交给 Pydantic AI Agent，再用 OpeniLink Bot API 异步回发。`x-cmd weixin` 与 `botpy` 仍保留为 legacy/debug 适配器。
 
-## 当前进度（2026-04-28）
+## 当前进度（2026-04-29）
 
-- [x] `uv` 项目初始化与可运行 CLI（`agent-service run` / `agent-service doctor`）
+- [x] `uv` 项目初始化与可运行 CLI（`agent-service serve` / `agent-service run` / `agent-service doctor`）
 - [x] 三层架构骨架：`adapters` / `agent` / `storage`
 - [x] 内部统一消息类型：`InboundMessage`、`AgentReply`、`ChannelAdapter`
 - [x] SQLite 持久化：渠道消息审计/去重 + Pydantic AI `ModelMessage` 会话历史 round-trip
 - [x] MiniMax OpenAI-compatible 接入（默认 `https://api.minimaxi.com/v1`）
 - [x] MiniMax 实网烟雾测试（模型返回正常）
-- [x] weixin 子进程链路本地模拟闭环（listen -> normalize -> send）
-- [x] `x-cmd weixin listen poll` 本机启动验证
+- [x] OpeniLink Hub Webhook 异步通道：签名验证、URL verification、`message.text` 归一化、去重、Bot API 回发
+- [x] weixin 子进程链路本地模拟闭环（legacy debug）
 - [ ] botpy 事件处理（`on_at_message_create` 等）完整实现（当前为占位适配器）
 
 ## 本次联调结果
@@ -28,17 +28,20 @@ Pydantic AI 驱动的多消息渠道 Agent 框架，支持微信/QQ 接入、会
 
 进行真实调用，返回成功（样例输出：`测试通过`）。
 
-### 2) weixin 收发闭环验证
+### 2) OpeniLink Webhook 异步链路
 
-当前项目统一使用 `x-cmd weixin`。本机 `doctor` 可发现 `x-cmd`，并已验证 `x-cmd weixin listen poll --timeout 1000` 可启动长轮询。
+当前默认通道为 `openilink`。OpeniLink Hub 负责微信连接、重连、Bot 状态、消息追踪和多 Bot 管理；本项目只保留 Agent、SQLite 历史、provider 选择和 Webhook App。
 
-同时进行了等价的子进程模拟联调：
+Webhook 行为：
 
-- `x-cmd weixin listen poll` 输出一条消息
-- 适配器解析并归一化为 `InboundMessage`
-- 发送端执行 `x-cmd weixin send --text <reply>`
+- `POST /openilink/webhook`
+- `type=url_verification` 直接返回 `{"challenge": "..."}`
+- `event.type=message.text` 校验 `X-Signature` 后归一化为 `InboundMessage`
+- 3 秒窗口内返回 `{"reply_async": true}`
+- 后台 worker 调用 Pydantic AI Agent
+- 使用 `POST {OPENILINK_HUB_URL}/bot/v1/message/send` 异步发送文本回复
 
-链路可闭环，说明适配器的异步子进程模式可用。
+当前不部署 OpenClaw；OpenClaw 只作为协议参考。`x-cmd weixin` 仍可用于手工对照和排障，不再作为主通道。
 
 ## 配置项
 
@@ -52,8 +55,15 @@ Pydantic AI 驱动的多消息渠道 Agent 框架，支持微信/QQ 接入、会
 - `MINIMAX_BASE_URL`（默认 `https://api.minimaxi.com/v1`）
 - `BOTPY_APPID`
 - `BOTPY_SECRET`
-- `ENABLED_CHANNELS`（如 `botpy,weixin`）
+- `ENABLED_CHANNELS`（默认 `openilink`，legacy 可用 `weixin` / `botpy`）
 - `SQLITE_PATH`
+- `AGENT_SERVICE_HOST`（默认 `127.0.0.1`）
+- `AGENT_SERVICE_PORT`（默认 `8080`）
+- `OPENILINK_HUB_URL`（默认 `http://localhost:9800`）
+- `OPENILINK_APP_TOKEN`
+- `OPENILINK_WEBHOOK_SECRET`
+- `OPENILINK_WEBHOOK_PATH`（默认 `/openilink/webhook`）
+- `OPENILINK_SYNC_REPLY`（默认 `false`，当前主流程固定使用 async handoff）
 - `WEIXIN_X_BIN`（默认 `x-cmd`）
 - `WEIXIN_POLL_TIMEOUT_MS`（weixin service log 轮询间隔，默认 `3000`）
 - `SELF_SENDER_IDS`
@@ -64,7 +74,27 @@ Pydantic AI 驱动的多消息渠道 Agent 框架，支持微信/QQ 接入、会
 uv sync
 cp .env.example .env
 uv run agent-service doctor
-uv run agent-service run --channels weixin
+uv run agent-service serve --channels openilink
+```
+
+本机默认双服务：
+
+- OpeniLink Hub: `http://localhost:9800`
+- Agent service: `http://localhost:8080`
+
+在 OpeniLink Hub 中创建或安装本地 App 时，推荐配置：
+
+- Events: `message.text`
+- Scopes: `message:read`, `message:write`, `bot:read`
+- Webhook URL: `http://host.docker.internal:8080/openilink/webhook`，或填写 Hub 容器/主机可访问的 Agent service 地址
+
+异步回包使用：
+
+```http
+POST /bot/v1/message/send
+Authorization: Bearer ${OPENILINK_APP_TOKEN}
+
+{"type":"text","content":"...","to":"wxid_...","trace_id":"tr_..."}
 ```
 
 ## 设计审阅（对照 Pydantic AI 标准示例）
@@ -75,14 +105,25 @@ uv run agent-service run --channels weixin
 - DeepSeek 使用专用 provider；MiniMax 使用 OpenAI-compatible provider
 - 工具注册走 `@agent.tool_plain`（与官方工具调用风格一致）
 - 多渠道适配器与 Agent 解耦，便于后续扩展
+- OpeniLink 通道只处理 Hub App 协议，不承担微信连接和重连状态管理
 
 ### 已补齐
 
 - 会话历史使用 Pydantic AI `ModelMessagesTypeAdapter` / `all_messages_json()` 存取
 - `message_history` 传入 `ModelMessage` 序列，保留 tool call/return 等结构
 - 渠道原始消息仍单独保存，用于审计、去重和排障
+- OpeniLink `trace_id`、`installation_id`、`bot.id`、`event.id`、`group.id` 保存在 `InboundMessage.raw`
+- 会话 key：
+  - 私聊：`openilink:{bot_id}:{sender_id}`
+  - 群聊：`openilink:{bot_id}:{group_id}:{sender_id}`
 
 ### 待完善（下一步）
+
+- [ ] 群消息定向策略实测
+  - 现在是什么：群消息的 `group.id` 已保存在 `InboundMessage.raw`；v1 回发 body 使用 `to=sender_id`，遵循 OpeniLink 默认语义。
+  - 为什么要做：不同 Hub/Bot provider 对群内回复目标可能存在差异，可能需要后续补充 `to/group` 策略。
+  - 要补什么：在真实微信群中验证 Bot API 的投递行为，必要时扩展 OpeniLink reply payload。
+  - 验收标准：私聊和群聊都能稳定回到触发消息的上下文。
 
 - [ ] botpy 真实事件接入
   - 现在是什么：`BotpyAdapter` 仍是占位实现，只会保持进程存活，不会真的连接 QQ 频道/机器人事件流。
@@ -119,4 +160,6 @@ uv run agent-service run --channels weixin
 - botpy: https://github.com/tencent-connect/botpy
 - x-cmd weixin listen: https://cn.x-cmd.com/mod/weixin/listen/
 - x-cmd weixin send: https://cn.x-cmd.com/mod/weixin/send/
+- OpeniLink Hub: https://github.com/openilink/openilink-hub
+- OpeniLink App Development: https://raw.githubusercontent.com/openilink/openilink-hub/main/docs/app-development.md
 - OpenClaw Weixin schema: https://github.com/Tencent/openclaw-weixin
