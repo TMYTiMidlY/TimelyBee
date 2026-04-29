@@ -232,7 +232,7 @@ OpeniLink/QQ Adapter
 - Pydantic AI Message History: https://ai.pydantic.dev/message-history
 - DeepSeek API Docs: https://api-docs.deepseek.com/
 - MiniMax OpenAI API Compatible (global): https://platform.minimax.io/docs/api-reference/text-openai-api
-- MiniMax OpenAI API Compatible (CN / minimaxi.com): https://platform.minimax.com/docs/api-reference/text-openai-api
+- MiniMax OpenAI API Compatible (CN / minimaxi.com): https://platform.minimaxi.com/docs/api-reference/text-openai-api
 - botpy: https://github.com/tencent-connect/botpy
 - x-cmd weixin listen: https://cn.x-cmd.com/mod/weixin/listen/
 - x-cmd weixin send: https://cn.x-cmd.com/mod/weixin/send/
